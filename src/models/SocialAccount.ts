@@ -13,7 +13,7 @@ export interface SocialAccountCredentials {
   username?: string;
   email?: string;
   password?: string;
+  email_password?: string;
   cookies?: string;
-  sessionData?: string;
 }
 

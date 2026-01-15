@@ -88,51 +88,64 @@ export class ScenarioExecutor {
         );
       }
 
-      // Get the profile for this session (scenarios run within existing sessions)
-      const gologinToken = process.env.GOLOGIN_TOKEN;
-      if (!gologinToken) {
-        throw new Error('GOLOGIN_TOKEN environment variable is required');
-      }
-
       // Get session to find associated profile
       await sessionService.getSession(sessionId);
 
-      // Try to get profile from gologin_profiles table for this social account
-      const profileResult = await db.query(
-        'SELECT gologin_profile_id FROM gologin_profiles WHERE social_account_id = $1 AND status = $2 ORDER BY last_used_at DESC NULLS LAST, created_at DESC LIMIT 1',
-        [socialAccountId, 'ACTIVE']
-      );
+      // Check if we should use Chrome (local mode)
+      const nodeEnv = process.env.NODE_ENV?.toLowerCase();
+      const useChrome = nodeEnv === 'development' || nodeEnv === 'local';
 
-      if (profileResult.rows.length === 0) {
-        throw new Error(`No active GoLogin profile found for social account ${socialAccountId}`);
+      let browserSession;
+
+      if (useChrome) {
+        // Chrome mode: no profile needed
+        logger.info(`Using Chrome for scenario execution (local mode)`);
+        const { openBrowserSession } = await import('../browser/browserLauncher');
+        browserSession = await openBrowserSession();
+      } else {
+        // GoLogin mode: profile management required
+        const gologinToken = process.env.GOLOGIN_TOKEN;
+        if (!gologinToken) {
+          throw new Error('GOLOGIN_TOKEN environment variable is required for GoLogin mode');
+        }
+
+        // Try to get profile from gologin_profiles table for this social account
+        const profileResult = await db.query(
+          'SELECT gologin_profile_id FROM gologin_profiles WHERE social_account_id = $1 AND status = $2 ORDER BY last_used_at DESC NULLS LAST, created_at DESC LIMIT 1',
+          [socialAccountId, 'ACTIVE']
+        );
+
+        if (profileResult.rows.length === 0) {
+          throw new Error(`No active GoLogin profile found for social account ${socialAccountId}`);
+        }
+
+        const gologinProfileId = profileResult.rows[0].gologin_profile_id;
+
+        // For scenarios, we'll reuse the profile but start a fresh browser session
+        // GoLogin will sync the profile state automatically
+        const { openBrowserSession } = await import('../browser/browserLauncher');
+        browserSession = await openBrowserSession({
+          gologinToken,
+          profileId: gologinProfileId,
+        });
       }
-
-      const gologinProfileId = profileResult.rows[0].gologin_profile_id;
-
-      // For scenarios, we'll reuse the profile but start a fresh browser session
-      // GoLogin will sync the profile state automatically
-      const { openGoLoginSession } = await import('../browser/gologinPuppeteer');
-      const goLoginSession = await openGoLoginSession({
-        gologinToken,
-        profileId: gologinProfileId,
-      });
 
       // Initialize adapter
       adapter = PlatformAdapterFactory.create(platform);
 
-      // Set browser components from GoLogin session
+      // Set browser components from browser session
       (adapter as any).setBrowserComponents(
-        goLoginSession.browser,
-        goLoginSession.page,
-        goLoginSession.stop
+        browserSession.browser,
+        browserSession.page,
+        browserSession.stop
       );
 
-      // Check if logged in (GoLogin profile should have session state)
+      // Check if logged in (GoLogin profile should have session state in GoLogin mode)
       const homeUrl = adapter.getHomeUrl();
       const { createActionLogContext } = await import('../utils/actionLogger');
       const logContext = createActionLogContext(sessionId, undefined, socialAccountId);
 
-      await loggedGoto(goLoginSession.page, homeUrl, { waitUntil: 'networkidle0' }, logContext);
+      await loggedGoto(browserSession.page, homeUrl, { waitUntil: 'networkidle0' }, logContext);
 
       if (!(await adapter.isLoggedIn())) {
         const credentials = await sessionService.getDecryptedCredentials(socialAccountId);
@@ -158,24 +171,26 @@ export class ScenarioExecutor {
       logger.info(`Scenario ${scenarioId} execution completed for session ${sessionId}`);
 
       // GoLogin handles state synchronization automatically, no need to manually save
-      // But we can create a snapshot for diagnostics
-      try {
-        const snapshotService = await import('../services/BrowserStateSnapshotService').then(m => m.getBrowserStateSnapshotService());
-        const profileResult = await db.query(
-          'SELECT id FROM gologin_profiles WHERE social_account_id = $1 AND status = $2 ORDER BY last_used_at DESC NULLS LAST, created_at DESC LIMIT 1',
-          [socialAccountId, 'ACTIVE']
-        );
-        const profileId = profileResult.rows.length > 0 ? profileResult.rows[0].id : undefined;
-
-        if (adapter && (adapter as any).page) {
-          await snapshotService.captureSnapshot(
-            sessionId,
-            profileId,
-            (adapter as any).page
+      // But we can create a snapshot for diagnostics (only in GoLogin mode)
+      if (!useChrome) {
+        try {
+          const snapshotService = await import('../services/BrowserStateSnapshotService').then(m => m.getBrowserStateSnapshotService());
+          const profileResult = await db.query(
+            'SELECT id FROM gologin_profiles WHERE social_account_id = $1 AND status = $2 ORDER BY last_used_at DESC NULLS LAST, created_at DESC LIMIT 1',
+            [socialAccountId, 'ACTIVE']
           );
+          const profileId = profileResult.rows.length > 0 ? profileResult.rows[0].id : undefined;
+
+          if (adapter && (adapter as any).page && profileId) {
+            await snapshotService.captureSnapshot(
+              sessionId,
+              profileId,
+              (adapter as any).page
+            );
+          }
+        } catch (error) {
+          logger.warn(`Failed to create snapshot after scenario ${scenarioId} execution:`, error);
         }
-      } catch (error) {
-        logger.warn(`Failed to create snapshot after scenario ${scenarioId} execution:`, error);
       }
     } catch (error) {
       logger.error(`Scenario execution failed for session ${sessionId}:`, error);

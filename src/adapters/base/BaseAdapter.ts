@@ -3,11 +3,11 @@ import { IPlatformAdapter } from '../interfaces/IPlatformAdapter';
 import { SocialAccountCredentials } from '../../models/SocialAccount';
 import { logger } from '../../utils/logger';
 import { humanDelay, randomDelay } from '../../utils/delay';
-import { openGoLoginSession, GoLoginSession } from '../../browser/gologinPuppeteer';
+import { openBrowserSession } from '../../browser/browserLauncher';
 
-export interface GoLoginBrowserOptions {
-  gologinToken: string;
-  profileId: string;
+export interface BrowserOptions {
+  gologinToken?: string;
+  profileId?: string;
 }
 
 export abstract class BaseAdapter implements IPlatformAdapter {
@@ -17,31 +17,49 @@ export abstract class BaseAdapter implements IPlatformAdapter {
   protected stopGoLoginSession: (() => Promise<void>) | null = null;
 
   /**
-   * Initialize browser with GoLogin
-   * @param options GoLogin token and profile ID
+   * Initialize browser (Chrome in local, GoLogin in dev/prod)
+   * @param options Optional GoLogin token and profile ID (required for GoLogin mode)
    */
-  protected async initializeBrowser(options?: GoLoginBrowserOptions): Promise<void> {
+  protected async initializeBrowser(options?: BrowserOptions): Promise<void> {
     if (this.browser) {
       return;
     }
 
-    if (!options || !options.gologinToken || !options.profileId) {
-      throw new Error('GoLogin token and profile ID are required');
+    // Check if we should use Chrome (local mode)
+    const nodeEnv = process.env.NODE_ENV?.toLowerCase();
+    const useChrome = nodeEnv === 'development' || nodeEnv === 'local';
+
+    if (useChrome) {
+      logger.info('Initializing browser with Chrome (local mode)');
+
+      // Open Chrome session
+      const browserSession = await openBrowserSession();
+
+      this.browser = browserSession.browser;
+      this.page = browserSession.page;
+      this.stopGoLoginSession = browserSession.stop;
+
+      logger.info('Browser initialized with Chrome');
+    } else {
+      // GoLogin mode: token and profile ID required
+      if (!options || !options.gologinToken || !options.profileId) {
+        throw new Error('GoLogin token and profile ID are required for GoLogin mode');
+      }
+
+      logger.info(`Initializing browser with GoLogin profile ${options.profileId}`);
+
+      // Open browser session (GoLogin mode)
+      const browserSession = await openBrowserSession({
+        gologinToken: options.gologinToken,
+        profileId: options.profileId,
+      });
+
+      this.browser = browserSession.browser;
+      this.page = browserSession.page;
+      this.stopGoLoginSession = browserSession.stop;
+
+      logger.info('Browser initialized with GoLogin');
     }
-
-    logger.info(`Initializing browser with GoLogin profile ${options.profileId}`);
-
-    // Open GoLogin session
-    const goLoginSession: GoLoginSession = await openGoLoginSession({
-      gologinToken: options.gologinToken,
-      profileId: options.profileId,
-    });
-
-    this.browser = goLoginSession.browser;
-    this.page = goLoginSession.page;
-    this.stopGoLoginSession = goLoginSession.stop;
-
-    logger.info('Browser initialized with GoLogin');
   }
 
   /**
@@ -124,6 +142,49 @@ export abstract class BaseAdapter implements IPlatformAdapter {
         }
         await humanDelay(1000);
       }
+    }
+  }
+
+  /**
+   * Finds and clicks an element by text content
+   * Useful for elements that don't have stable selectors
+   * @param page The page to search in
+   * @param baseSelector Base CSS selector to narrow down the search (e.g., 'div[role="button"]')
+   * @param text Text content to search for (case-insensitive partial match)
+   * @param timeout Timeout in milliseconds
+   */
+  protected async clickElementByText(
+    page: Page,
+    baseSelector: string,
+    text: string,
+    timeout: number = 10000
+  ): Promise<void> {
+    await page.waitForSelector(baseSelector, { timeout }).catch(() => {
+      // If base selector doesn't exist, that's okay - we'll search anyway
+    });
+
+    const clicked = await page.evaluate(
+      (selector, searchText) => {
+        // @ts-expect-error - This code runs in browser context where document exists
+        const elements = Array.from(document.querySelectorAll(selector));
+        const element = elements.find((el: any) => {
+          const elementText = el.textContent?.trim() || '';
+          return elementText.toLowerCase().includes(searchText.toLowerCase());
+        });
+
+        if (element) {
+          // @ts-expect-error - HTMLElement exists in browser context
+          (element as HTMLElement).click();
+          return true;
+        }
+        return false;
+      },
+      baseSelector,
+      text
+    );
+
+    if (!clicked) {
+      throw new Error(`Element with text "${text}" not found using selector "${baseSelector}"`);
     }
   }
 

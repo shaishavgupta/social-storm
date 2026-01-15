@@ -38,7 +38,8 @@ export class TwitterAdapter extends BaseAdapter {
           }
         }, twitterSelectors.usernameInput, username);
         await humanDelay(1000);
-        await this.page.click(twitterSelectors.nextButton);
+        // Click "Next" button by text content (Puppeteer doesn't support :has-text() selector)
+        await this.clickElementByText(this.page, twitterSelectors.buttonBase, 'Next');
         await humanDelay(1500);
       }
 
@@ -56,7 +57,8 @@ export class TwitterAdapter extends BaseAdapter {
         }, twitterSelectors.passwordInput, credentials.password);
         await humanDelay(1000);
         const navigationPromise = this.page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 });
-        await this.page.click(twitterSelectors.loginSubmit);
+        // Click "Log in" button by text content (Puppeteer doesn't support :has-text() selector)
+        await this.clickElementByText(this.page, twitterSelectors.buttonBase, 'Log in');
         await navigationPromise;
         // Check if we're on home page
         const url = this.page.url();

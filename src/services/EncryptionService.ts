@@ -2,12 +2,8 @@ import crypto from 'crypto';
 import { logger } from '../utils/logger';
 import { SocialAccountCredentials } from '../models/SocialAccount';
 
-const ALGORITHM = 'aes-256-gcm';
+const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16;
-const SALT_LENGTH = 64;
-const TAG_LENGTH = 16;
-const TAG_POSITION = SALT_LENGTH + IV_LENGTH;
-const ENCRYPTED_POSITION = TAG_POSITION + TAG_LENGTH;
 
 export class EncryptionService {
   private encryptionKey: Buffer;
@@ -17,10 +13,9 @@ export class EncryptionService {
     if (!key) {
       throw new Error('ENCRYPTION_KEY environment variable is not set');
     }
-    if (key.length !== 64) {
-      throw new Error('ENCRYPTION_KEY must be 64 characters (32 bytes in hex)');
-    }
-    this.encryptionKey = Buffer.from(key, 'hex');
+    // For AES-256, we need exactly 32 bytes
+    // Hash the key to ensure we always get 32 bytes regardless of input length
+    this.encryptionKey = crypto.createHash('sha256').update(key).digest();
   }
 
   /**
@@ -30,15 +25,13 @@ export class EncryptionService {
     try {
       const text = JSON.stringify(credentials);
       const iv = crypto.randomBytes(IV_LENGTH);
-      const salt = crypto.randomBytes(SALT_LENGTH);
-
       const cipher = crypto.createCipheriv(ALGORITHM, this.encryptionKey, iv);
-      cipher.setAAD(salt);
 
-      const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
-      const tag = cipher.getAuthTag();
+      let encrypted = cipher.update(text, 'utf8', 'base64');
+      encrypted += cipher.final('base64');
 
-      return Buffer.concat([salt, iv, tag, encrypted]).toString('base64');
+      // Prepend IV to encrypted data
+      return iv.toString('base64') + ':' + encrypted;
     } catch (error) {
       logger.error('Encryption failed:', error);
       throw new Error('Failed to encrypt credentials');
@@ -50,19 +43,19 @@ export class EncryptionService {
    */
   decrypt(encryptedData: string): SocialAccountCredentials {
     try {
-      const data = Buffer.from(encryptedData, 'base64');
+      const parts = encryptedData.split(':');
+      if (parts.length !== 2) {
+        throw new Error('Invalid encrypted data format');
+      }
 
-      const salt = data.subarray(0, SALT_LENGTH);
-      const iv = data.subarray(SALT_LENGTH, TAG_POSITION);
-      const tag = data.subarray(TAG_POSITION, ENCRYPTED_POSITION);
-      const encrypted = data.subarray(ENCRYPTED_POSITION);
+      const iv = Buffer.from(parts[0], 'base64');
+      const encrypted = parts[1];
 
       const decipher = crypto.createDecipheriv(ALGORITHM, this.encryptionKey, iv);
-      decipher.setAuthTag(tag);
-      decipher.setAAD(salt);
+      let decrypted = decipher.update(encrypted, 'base64', 'utf8');
+      decrypted += decipher.final('utf8');
 
-      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-      return JSON.parse(decrypted.toString('utf8')) as SocialAccountCredentials;
+      return JSON.parse(decrypted) as SocialAccountCredentials;
     } catch (error) {
       logger.error('Decryption failed:', error);
       throw new Error('Failed to decrypt credentials');

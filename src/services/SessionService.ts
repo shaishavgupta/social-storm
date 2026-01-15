@@ -5,7 +5,7 @@ import { getEncryptionService } from './EncryptionService';
 
 const MIN_SESSION_DURATION_MS = 8 * 60 * 1000; // 8 minutes
 const MAX_SESSION_DURATION_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_SESSIONS_PER_DAY = 3;
+const MAX_SESSIONS_PER_DAY = 300;
 
 export interface CreateSessionParams {
   socialAccountId: number;
@@ -174,7 +174,7 @@ export class SessionService {
       }
 
       const result = await db.query(sql, params);
-      return result.rows.map((row) => this.mapRowToSession(row));
+      return result.rows.map((row: any) => this.mapRowToSession(row));
     } catch (error) {
       logger.error('Failed to list sessions:', error);
       throw error;

@@ -12,8 +12,8 @@ const createSocialAccountSchema = z.object({
     username: z.string().optional(),
     email: z.string().optional(),
     password: z.string().optional(),
+    email_password: z.string().optional(),
     cookies: z.string().optional(),
-    sessionData: z.string().optional(),
   }),
 });
 
@@ -22,8 +22,8 @@ const updateSocialAccountSchema = z.object({
     username: z.string().optional(),
     email: z.string().optional(),
     password: z.string().optional(),
+    email_password: z.string().optional(),
     cookies: z.string().optional(),
-    sessionData: z.string().optional(),
   }).optional(),
   is_active: z.boolean().optional(),
 });
@@ -66,7 +66,7 @@ export async function socialAccountsRoutes(fastify: FastifyInstance): Promise<vo
       const db = getDbConnection();
       const result = await db.query('SELECT * FROM social_accounts ORDER BY created_at DESC');
 
-      const accounts = result.rows.map((row) => mapRowToAccount(row));
+      const accounts = result.rows.map((row: any) => mapRowToAccount(row));
       return reply.send({ accounts });
     } catch (error) {
       logger.error('Failed to list social accounts:', error);

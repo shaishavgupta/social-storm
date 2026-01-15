@@ -159,4 +159,3 @@ VALUES (
   NOW(),
   NOW()
 );
-

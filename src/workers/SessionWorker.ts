@@ -46,9 +46,14 @@ export class SessionWorker {
     const metricsService = getMetricsService();
     const db = getDbConnection();
 
+    // Check if we should use Chrome (local mode)
+    const nodeEnv = process.env.NODE_ENV?.toLowerCase();
+    const useChrome = nodeEnv === 'development' || nodeEnv === 'local';
+
+    // GOLOGIN_TOKEN is only required in non-local environments
     const gologinToken = process.env.GOLOGIN_TOKEN;
-    if (!gologinToken) {
-      throw new Error('GOLOGIN_TOKEN environment variable is required');
+    if (!useChrome && !gologinToken) {
+      throw new Error('GOLOGIN_TOKEN environment variable is required for GoLogin mode');
     }
 
     let adapter: IPlatformAdapter | null = null;
@@ -71,8 +76,8 @@ export class SessionWorker {
 
       const platform = accountResult.rows[0].platform as Platform;
 
-      // Start session with SessionRunner (handles GoLogin profile management)
-      sessionRunner = new SessionRunner(gologinToken);
+      // Start session with SessionRunner (handles browser session management)
+      sessionRunner = new SessionRunner(gologinToken || undefined);
       sessionContext = await sessionRunner.startSession({
         socialAccountId,
       });
@@ -87,14 +92,14 @@ export class SessionWorker {
         sessionContext.stop
       );
 
-      // Check if logged in (GoLogin profile may already have session)
+      // Check if logged in (GoLogin profile may already have session in GoLogin mode)
       const homeUrl = adapter.getHomeUrl();
       await loggedGoto(sessionContext.page, homeUrl, { waitUntil: 'networkidle0' }, sessionContext.logContext);
       let loggedIn = await adapter.isLoggedIn();
 
-      if (loggedIn) {
+      if (loggedIn && !useChrome) {
         logger.info(`GoLogin profile already logged in for session ${sessionId}`);
-      } else {
+      } else if (!loggedIn) {
         // Perform login with credentials
         const credentials = await sessionService.getDecryptedCredentials(socialAccountId);
         await adapter.login(credentials);

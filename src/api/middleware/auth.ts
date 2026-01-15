@@ -25,14 +25,17 @@ export async function authenticateSuperuser(
       return;
     }
 
+    // Extract token from Bearer header
+    const token = authHeader.split(' ')[1]; // Remove 'Bearer ' prefix
+
     // Verify JWT token
     try {
-      const decoded = await request.jwtVerify<{ id: number; username: string }>();
+      const decoded = await request.server.jwt.verify(token);
 
       // Verify superuser exists
       const db = getDbConnection();
       const result = await db.query('SELECT id, username FROM superuser WHERE id = $1', [
-        decoded.id,
+        (decoded as { id: number }).id,
       ]);
 
       if (result.rows.length === 0) {

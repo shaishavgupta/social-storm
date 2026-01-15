@@ -7,8 +7,9 @@ export const twitterSelectors = {
   loginButton: 'a[href="/i/flow/login"]',
   usernameInput: 'input[autocomplete="username"]',
   passwordInput: 'input[name="password"]',
-  nextButton: 'div[role="button"]:has-text("Next")',
-  loginSubmit: 'div[role="button"]:has-text("Log in")',
+  // Note: nextButton and loginSubmit use text-based selection via clickElementByText helper
+  // Base selector for buttons with text content
+  buttonBase: 'div[role="button"]',
 
   // Navigation
   homeButton: 'a[href="/home"]',
