@@ -1,25 +1,10 @@
 import { Browser, BrowserContext, Page, chromium } from 'playwright';
 import { logger } from '../utils/logger';
+import { GoLogin } from 'gologin';
 
-// GoLogin SDK import - adjust based on actual package structure
-// The package may export as 'GologinApi' (function) or 'GoLogin' (class)
-let createGoLoginClient: (options: { token: string }) => any;
-try {
-  const gologinModule = require('gologin');
-  // Try different possible exports
-  if (typeof gologinModule.GologinApi === 'function') {
-    createGoLoginClient = gologinModule.GologinApi;
-  } else if (typeof gologinModule.GoLogin === 'function') {
-    createGoLoginClient = (options: { token: string }) => new gologinModule.GoLogin(options);
-  } else if (typeof gologinModule.default === 'function') {
-    createGoLoginClient = gologinModule.default;
-  } else {
-    throw new Error('GoLogin client not found in gologin package');
-  }
-} catch (error) {
-  logger.error('Failed to import gologin package. Make sure it is installed: npm install gologin');
-  throw error;
-}
+const GL_TOKEN = process.env.GL_TOKEN;
+const PROFILE_ID = process.env.PROFILE_ID || '690c6e26c408ec7b3bc91178';
+
 
 export interface GoLoginSessionOptions {
   gologinToken: string;
@@ -51,21 +36,21 @@ export async function openGoLoginSession(
     throw new Error('GoLogin profile ID is required');
   }
 
-  let goLogin: any = null;
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
   let page: Page | null = null;
 
   try {
     // Initialize GoLogin client
-    goLogin = createGoLoginClient({
-      token: gologinToken,
+    const gologin = new GoLogin({
+      token: GL_TOKEN,
+      profile_id: PROFILE_ID,
     });
 
     logger.info(`Starting GoLogin session for profile ${profileId}`);
 
     // Start the GoLogin browser and get WebSocket CDP URL
-    const { wsUrl } = await goLogin.start({ profileId });
+    const { wsUrl } = await gologin.start({ profileId });
 
     if (!wsUrl) {
       throw new Error('Failed to get WebSocket URL from GoLogin');
@@ -119,14 +104,11 @@ export async function openGoLoginSession(
         }
 
         // Stop GoLogin session
-        if (goLogin) {
-          try {
-            await goLogin.stop({ profileId });
-            logger.info(`GoLogin session stopped for profile ${profileId}`);
-          } catch (error) {
-            logger.warn('Error stopping GoLogin session:', error);
-          }
-          goLogin = null;
+        try {
+          await gologin.stop();
+          logger.info(`GoLogin session stopped for profile ${profileId}`);
+        } catch (error) {
+          logger.warn('Error stopping GoLogin session:', error);
         }
 
         context = null;
@@ -157,14 +139,6 @@ export async function openGoLoginSession(
     if (browser) {
       try {
         await browser.close();
-      } catch (e) {
-        // Ignore cleanup errors
-      }
-    }
-
-    if (goLogin) {
-      try {
-        await goLogin.stop({ profileId });
       } catch (e) {
         // Ignore cleanup errors
       }
