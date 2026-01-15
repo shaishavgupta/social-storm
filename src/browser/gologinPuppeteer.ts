@@ -1,10 +1,6 @@
-import { Browser, BrowserContext, Page, chromium } from 'playwright';
+import { Browser, Page, connect } from 'puppeteer-core';
 import { logger } from '../utils/logger';
-import { GoLogin } from 'gologin';
-
-const GL_TOKEN = process.env.GL_TOKEN;
-const PROFILE_ID = process.env.PROFILE_ID || '690c6e26c408ec7b3bc91178';
-
+import { GologinApi } from 'gologin';
 
 export interface GoLoginSessionOptions {
   gologinToken: string;
@@ -13,15 +9,14 @@ export interface GoLoginSessionOptions {
 
 export interface GoLoginSession {
   browser: Browser;
-  context: BrowserContext;
   page: Page;
   stop: () => Promise<void>;
 }
 
 /**
- * Opens a GoLogin session and connects Playwright via CDP
+ * Opens a GoLogin session and connects Puppeteer via CDP
  * @param options GoLogin token and profile ID
- * @returns Browser, context, page, and stop function
+ * @returns Browser, page, and stop function
  */
 export async function openGoLoginSession(
   options: GoLoginSessionOptions
@@ -37,54 +32,54 @@ export async function openGoLoginSession(
   }
 
   let browser: Browser | null = null;
-  let context: BrowserContext | null = null;
   let page: Page | null = null;
+  let gologin: ReturnType<typeof GologinApi> | null = null;
+  let puppeteerBrowser: Browser | null = null;
 
   try {
     // Initialize GoLogin client
-    const gologin = new GoLogin({
-      token: GL_TOKEN,
-      profile_id: PROFILE_ID,
-    });
+    gologin = GologinApi({ token: gologinToken });
 
     logger.info(`Starting GoLogin session for profile ${profileId}`);
 
-    // Start the GoLogin browser and get WebSocket CDP URL
-    const { wsUrl } = await gologin.start({ profileId });
+    // Start the GoLogin browser and get Puppeteer browser instance
+    const launchResult = await gologin.launch({ profileId });
+    puppeteerBrowser = launchResult.browser as Browser;
+
+    if (!puppeteerBrowser) {
+      throw new Error('Failed to get browser instance from GoLogin');
+    }
+
+    // Get WebSocket CDP URL from Puppeteer browser
+    const wsUrl = puppeteerBrowser.wsEndpoint();
 
     if (!wsUrl) {
-      throw new Error('Failed to get WebSocket URL from GoLogin');
+      throw new Error('Failed to get WebSocket URL from GoLogin browser');
     }
 
-    logger.info(`GoLogin browser started, connecting Playwright to CDP: ${wsUrl}`);
+    logger.info(`GoLogin browser started, connecting Puppeteer to CDP: ${wsUrl}`);
 
-    // Connect Playwright to the GoLogin browser via CDP
-    browser = await chromium.connectOverCDP(wsUrl);
-
-    // Get the default context (GoLogin manages the context)
-    const contexts = browser.contexts();
-    if (contexts.length === 0) {
-      throw new Error('No browser context found after connecting to GoLogin');
-    }
-
-    context = contexts[0];
+    // Connect Puppeteer to the GoLogin browser via CDP
+    browser = await connect({
+      browserWSEndpoint: wsUrl,
+    });
 
     // Get or create a page
-    const pages = context.pages();
+    const pages = await browser.pages();
     if (pages.length > 0) {
       page = pages[0];
     } else {
-      page = await context.newPage();
+      page = await browser.newPage();
     }
 
-    logger.info('Successfully connected Playwright to GoLogin browser');
+    logger.info('Successfully connected Puppeteer to GoLogin browser');
 
     // Create stop function
     const stop = async (): Promise<void> => {
       try {
         logger.info(`Stopping GoLogin session for profile ${profileId}`);
 
-        // Close Playwright connection
+        // Close Puppeteer connection
         if (page) {
           try {
             await page.close();
@@ -96,22 +91,32 @@ export async function openGoLoginSession(
 
         if (browser) {
           try {
-            await browser.close();
+            await browser.disconnect();
           } catch (error) {
-            logger.warn('Error closing browser:', error);
+            logger.warn('Error disconnecting browser:', error);
           }
           browser = null;
         }
 
         // Stop GoLogin session
-        try {
-          await gologin.stop();
-          logger.info(`GoLogin session stopped for profile ${profileId}`);
-        } catch (error) {
-          logger.warn('Error stopping GoLogin session:', error);
+        if (puppeteerBrowser) {
+          try {
+            await puppeteerBrowser.close();
+          } catch (error) {
+            logger.warn('Error closing Puppeteer browser:', error);
+          }
+          puppeteerBrowser = null;
         }
 
-        context = null;
+        if (gologin) {
+          try {
+            await gologin.exit();
+            logger.info(`GoLogin session stopped for profile ${profileId}`);
+          } catch (error) {
+            logger.warn('Error exiting GoLogin session:', error);
+          }
+          gologin = null;
+        }
       } catch (error) {
         logger.error('Error in stop function:', error);
         throw error;
@@ -120,7 +125,6 @@ export async function openGoLoginSession(
 
     return {
       browser,
-      context,
       page,
       stop,
     };
@@ -138,7 +142,7 @@ export async function openGoLoginSession(
 
     if (browser) {
       try {
-        await browser.close();
+        await browser.disconnect();
       } catch (e) {
         // Ignore cleanup errors
       }

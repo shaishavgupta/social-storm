@@ -1,10 +1,10 @@
 # Social Media Engagement Simulation Tool
 
-A TypeScript-based SaaS system for simulating social media engagement using Playwright, with multi-platform support, session management, Grok-powered comment generation, and comprehensive interaction tracking.
+A TypeScript-based SaaS system for simulating social media engagement using Puppeteer, with multi-platform support, session management, Grok-powered comment generation, and comprehensive interaction tracking.
 
 ## Features
 
-- **Multi-Platform Support**: Twitter and Facebook adapters with Playwright automation
+- **Multi-Platform Support**: Twitter and Facebook adapters with Puppeteer automation
 - **Dynamic Interaction Flows**: Create and execute ordered interaction scenarios
 - **AI-Powered Comments**: Grok API integration for generating contextually relevant comments
 - **Comprehensive Tracking**: Detailed interaction logging with entity relationships
@@ -18,7 +18,7 @@ A TypeScript-based SaaS system for simulating social media engagement using Play
 - Node.js 20+
 - PostgreSQL
 - Redis
-- Playwright browsers (installed automatically)
+- Chromium browser (for Puppeteer, installed automatically)
 
 ## Environment Variables
 

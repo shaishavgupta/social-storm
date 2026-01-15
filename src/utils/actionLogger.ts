@@ -1,4 +1,4 @@
-import { Page } from 'playwright';
+import { Page } from 'puppeteer-core';
 import { getActionLogService } from '../services/ActionLogService';
 import { ActionType } from '../models/ActionLog';
 import { logger } from './logger';
@@ -58,19 +58,21 @@ export function createActionLogContext(
 export async function loggedGoto(
   page: Page,
   url: string,
-  options: Parameters<Page['goto']>[1],
-  logContext: ActionLogContext
+  options?: Parameters<Page['goto']>[1],
+  logContext?: ActionLogContext
 ): Promise<void> {
   await page.goto(url, options);
-  await logContext.logAction({
-    actionType: 'NAVIGATE',
-    url: page.url(),
-    metadata: {
-      targetUrl: url,
-      finalUrl: page.url(),
-      options,
-    },
-  });
+  if (logContext) {
+    await logContext.logAction({
+      actionType: 'NAVIGATE',
+      url: page.url(),
+      metadata: {
+        targetUrl: url,
+        finalUrl: page.url(),
+        options,
+      },
+    });
+  }
 }
 
 /**
@@ -90,7 +92,7 @@ export async function loggedClick(
 }
 
 /**
- * Logged version of page.fill() or page.type()
+ * Logged version of page.type()
  * Logs only the length of text, not the actual content
  */
 export async function loggedType(
@@ -99,7 +101,7 @@ export async function loggedType(
   text: string,
   logContext: ActionLogContext
 ): Promise<void> {
-  await page.fill(selector, text);
+  await page.type(selector, text);
   await logContext.logAction({
     actionType: 'TYPE',
     target: selector,
@@ -112,14 +114,14 @@ export async function loggedType(
 }
 
 /**
- * Logged version of page.waitForTimeout()
+ * Logged version of wait for timeout (Puppeteer doesn't have waitForTimeout, using Promise)
  */
 export async function loggedWaitForTimeout(
   page: Page,
   timeout: number,
   logContext: ActionLogContext
 ): Promise<void> {
-  await page.waitForTimeout(timeout);
+  await new Promise((resolve) => setTimeout(resolve, timeout));
   await logContext.logAction({
     actionType: 'WAIT',
     url: page.url(),
@@ -139,7 +141,7 @@ export async function loggedWaitForSelector(
   options?: Parameters<Page['waitForSelector']>[1],
   logContext?: ActionLogContext
 ): Promise<void> {
-  await page.waitForSelector(selector);
+  await page.waitForSelector(selector, options);
   if (logContext) {
     await logContext.logAction({
       actionType: 'WAIT',
@@ -171,7 +173,8 @@ export async function loggedScreenshot(
       },
     });
   }
-  return screenshot;
+  // Puppeteer returns Uint8Array, convert to Buffer
+  return Buffer.from(screenshot);
 }
 
 /**

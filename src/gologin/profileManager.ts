@@ -113,7 +113,7 @@ export class ProfileManager {
    */
   async getValidProfileForUser(
     socialAccountId: number,
-    platform?: Platform
+    _platform?: Platform
   ): Promise<ProfileRecord> {
     const db = getDbConnection();
 

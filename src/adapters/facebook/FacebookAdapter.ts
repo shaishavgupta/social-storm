@@ -21,29 +21,53 @@ export class FacebookAdapter extends BaseAdapter {
     }
 
     try {
-      await this.page.goto('https://www.facebook.com/login', { waitUntil: 'networkidle' });
+      await this.page.goto('https://www.facebook.com/login', { waitUntil: 'networkidle0' });
       await humanDelay(2000);
 
       // Enter email/username
       if (credentials.email || credentials.username) {
         const email = credentials.email || credentials.username || '';
-        await this.page.fill(facebookSelectors.emailInput, email);
+        await this.page.evaluate((sel, val) => {
+          // @ts-expect-error - This code runs in browser context where document and DOM types exist
+          const el = document.querySelector(sel);
+          // @ts-expect-error - HTMLInputElement exists in browser context
+          if (el && el instanceof HTMLInputElement) {
+            el.value = '';
+            el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }, facebookSelectors.emailInput, email);
         await humanDelay(1000);
       }
 
       // Enter password
       if (credentials.password) {
-        await this.page.fill(facebookSelectors.passwordInput, credentials.password);
+        await this.page.evaluate((sel, val) => {
+          // @ts-expect-error - This code runs in browser context where document and DOM types exist
+          const el = document.querySelector(sel);
+          // @ts-expect-error - HTMLInputElement exists in browser context
+          if (el && el instanceof HTMLInputElement) {
+            el.value = '';
+            el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }, facebookSelectors.passwordInput, credentials.password);
         await humanDelay(1000);
+        const navigationPromise = this.page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 });
         await this.page.click(facebookSelectors.loginButton);
-        await this.page.waitForURL('**/home**', { timeout: 30000 });
+        await navigationPromise;
+        // Check if we're on home page
+        const url = this.page.url();
+        if (!url.includes('/home')) {
+          throw new Error('Login failed - did not navigate to home page');
+        }
       }
 
       // If cookies/session data provided, use it
       if (credentials.cookies) {
         const cookies = JSON.parse(credentials.cookies);
-        await this.context?.addCookies(cookies);
-        await this.page.goto('https://www.facebook.com', { waitUntil: 'networkidle' });
+        await this.page.setCookie(...cookies);
+        await this.page.goto('https://www.facebook.com', { waitUntil: 'networkidle0' });
       }
 
       this.isAuthenticated = await this.isLoggedIn();
@@ -77,13 +101,12 @@ export class FacebookAdapter extends BaseAdapter {
     }
 
     try {
-      await this.page.goto(postUrl, { waitUntil: 'networkidle' });
+      await this.page.goto(postUrl, { waitUntil: 'networkidle0' });
       await humanDelay(2000);
 
-      const likeButton = this.page.locator(facebookSelectors.likeButton).first();
       await this.humanMouseMove(this.page, facebookSelectors.likeButton);
       await humanDelay(500);
-      await likeButton.click();
+      await this.page.click(facebookSelectors.likeButton);
       await humanDelay(1000);
 
       const postId = this.extractPostId(postUrl);
@@ -112,7 +135,7 @@ export class FacebookAdapter extends BaseAdapter {
     }
 
     try {
-      await this.page.goto(postUrl, { waitUntil: 'networkidle' });
+      await this.page.goto(postUrl, { waitUntil: 'networkidle0' });
       await humanDelay(2000);
 
       await this.page.click(facebookSelectors.commentButton);
@@ -150,21 +173,45 @@ export class FacebookAdapter extends BaseAdapter {
     }
 
     try {
-      await this.page.goto(postUrl, { waitUntil: 'networkidle' });
+      await this.page.goto(postUrl, { waitUntil: 'networkidle0' });
       await humanDelay(2000);
 
       // Click more options
       await this.page.click('[aria-label*="More"]');
       await humanDelay(500);
 
-      // Click report
-      await this.page.click('span:has-text("Report")');
+      // Click report - use evaluate to find element with text
+      await this.page.evaluate(() => {
+        // @ts-expect-error - This code runs in browser context where document exists
+        const spans = Array.from(document.querySelectorAll('span'));
+        const reportSpan = spans.find((span: any) => span.textContent?.includes('Report'));
+        if (reportSpan) {
+          // @ts-expect-error - HTMLElement exists in browser context
+          (reportSpan as HTMLElement).click();
+        }
+      });
       await humanDelay(1000);
 
       // Select reason
-      await this.page.click(`span:has-text("${reason}")`);
+      await this.page.evaluate((reasonText) => {
+        // @ts-expect-error - This code runs in browser context where document exists
+        const spans = Array.from(document.querySelectorAll('span'));
+        const reasonSpan = spans.find((span: any) => span.textContent?.includes(reasonText));
+        if (reasonSpan) {
+          // @ts-expect-error - HTMLElement exists in browser context
+          (reasonSpan as HTMLElement).click();
+        }
+      }, reason);
       await humanDelay(500);
-      await this.page.click('button:has-text("Submit")');
+      await this.page.evaluate(() => {
+        // @ts-expect-error - This code runs in browser context where document exists
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const submitButton = buttons.find((btn: any) => btn.textContent?.includes('Submit'));
+        if (submitButton) {
+          // @ts-expect-error - button elements have click method in browser context
+          submitButton.click();
+        }
+      });
       await humanDelay(1000);
 
       const postId = this.extractPostId(postUrl);
@@ -193,20 +240,37 @@ export class FacebookAdapter extends BaseAdapter {
     }
 
     try {
-      await this.page.goto(commentUrl, { waitUntil: 'networkidle' });
+      await this.page.goto(commentUrl, { waitUntil: 'networkidle0' });
       await humanDelay(2000);
 
       // Find the specific comment and like it
       const commentId = this.extractCommentId(commentUrl);
-      const commentLikeButton = this.page
-        .locator(`[data-testid="UFI2Comment/root"]:has([href*="${commentId}"])`)
-        .locator(facebookSelectors.commentLikeButton)
-        .first();
+      // Find comment container with the comment ID using evaluate
+      const commentContainerHandle = await this.page.evaluateHandle((commentId) => {
+        // @ts-expect-error - This code runs in browser context where document exists
+        const containers = Array.from(document.querySelectorAll('[data-testid="UFI2Comment/root"]'));
+        return containers.find((container: any) => {
+          const link = container.querySelector(`[href*="${commentId}"]`);
+          return link !== null;
+        });
+      }, commentId);
 
-      await this.humanMouseMove(this.page, facebookSelectors.commentLikeButton);
-      await humanDelay(500);
-      await commentLikeButton.click();
-      await humanDelay(1000);
+      if (commentContainerHandle && commentContainerHandle.asElement()) {
+        const commentLikeButton = await commentContainerHandle.asElement()?.$(facebookSelectors.commentLikeButton);
+        if (commentLikeButton) {
+          await this.humanMouseMove(this.page, facebookSelectors.commentLikeButton);
+          await humanDelay(500);
+          await commentLikeButton.click();
+          await humanDelay(1000);
+        }
+        await commentContainerHandle.dispose();
+      } else {
+        // Fallback: try to click the like button directly
+        await this.humanMouseMove(this.page, facebookSelectors.commentLikeButton);
+        await humanDelay(500);
+        await this.page.click(facebookSelectors.commentLikeButton);
+        await humanDelay(1000);
+      }
 
       return {
         success: true,
@@ -232,16 +296,31 @@ export class FacebookAdapter extends BaseAdapter {
     }
 
     try {
-      await this.page.goto(commentUrl, { waitUntil: 'networkidle' });
+      await this.page.goto(commentUrl, { waitUntil: 'networkidle0' });
       await humanDelay(2000);
 
       const commentId = this.extractCommentId(commentUrl);
-      const commentReplyButton = this.page
-        .locator(`[data-testid="UFI2Comment/root"]:has([href*="${commentId}"])`)
-        .locator(facebookSelectors.commentReplyButton)
-        .first();
+      // Find comment container with the comment ID using evaluate
+      const commentContainerHandle = await this.page.evaluateHandle((commentId) => {
+        // @ts-expect-error - This code runs in browser context where document exists
+        const containers = Array.from(document.querySelectorAll('[data-testid="UFI2Comment/root"]'));
+        return containers.find((container: any) => {
+          const link = container.querySelector(`[href*="${commentId}"]`);
+          return link !== null;
+        });
+      }, commentId);
 
-      await commentReplyButton.click();
+      if (commentContainerHandle && commentContainerHandle.asElement()) {
+        const commentReplyButton = await commentContainerHandle.asElement()?.$(facebookSelectors.commentReplyButton);
+        if (commentReplyButton) {
+          await commentReplyButton.click();
+        } else {
+          await this.page.click(facebookSelectors.commentReplyButton);
+        }
+        await commentContainerHandle.dispose();
+      } else {
+        await this.page.click(facebookSelectors.commentReplyButton);
+      }
       await humanDelay(1000);
 
       await this.humanType(this.page, facebookSelectors.composeTextarea, replyText);
@@ -276,21 +355,31 @@ export class FacebookAdapter extends BaseAdapter {
     }
 
     try {
-      await this.page.goto('https://www.facebook.com/search/posts', { waitUntil: 'networkidle' });
+      await this.page.goto('https://www.facebook.com/search/posts', { waitUntil: 'networkidle0' });
       await humanDelay(2000);
 
-      await this.page.fill(facebookSelectors.searchInput, query);
+      await this.page.evaluate((sel, val) => {
+        // @ts-expect-error - This code runs in browser context where document and DOM types exist
+        const el = document.querySelector(sel);
+        // @ts-expect-error - HTMLInputElement exists in browser context
+        if (el && el instanceof HTMLInputElement) {
+          el.value = '';
+          el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, facebookSelectors.searchInput, query);
       await this.page.keyboard.press('Enter');
       await this.page.waitForSelector(facebookSelectors.post, { timeout: 10000 });
       await humanDelay(2000);
 
-      const posts = await this.page.locator(facebookSelectors.post).all();
+      const posts = await this.page.$$(facebookSelectors.post);
       const postList: Post[] = [];
 
       for (const post of posts.slice(0, 10)) {
         try {
-          const text = await post.locator(facebookSelectors.postText).textContent();
-          const link = await post.locator('a[href*="/posts/"]').first().getAttribute('href');
+          const text = await post.$eval(facebookSelectors.postText, (el) => el.textContent || '');
+          const linkElement = await post.$('a[href*="/posts/"]');
+          const link = linkElement ? await linkElement.evaluate((el) => el.getAttribute('href')) : null;
           const postId = link ? this.extractPostId(`https://www.facebook.com${link}`) : '';
 
           if (text && postId) {
@@ -318,7 +407,7 @@ export class FacebookAdapter extends BaseAdapter {
     }
 
     try {
-      await this.page.goto('https://www.facebook.com/logout', { waitUntil: 'networkidle' });
+      await this.page.goto('https://www.facebook.com/logout', { waitUntil: 'networkidle0' });
       this.isAuthenticated = false;
       logger.info('Facebook logout successful');
     } catch (error) {

@@ -111,7 +111,7 @@ export class ScenarioExecutor {
 
       // For scenarios, we'll reuse the profile but start a fresh browser session
       // GoLogin will sync the profile state automatically
-      const { openGoLoginSession } = await import('../browser/gologinPlaywright');
+      const { openGoLoginSession } = await import('../browser/gologinPuppeteer');
       const goLoginSession = await openGoLoginSession({
         gologinToken,
         profileId: gologinProfileId,
@@ -123,7 +123,6 @@ export class ScenarioExecutor {
       // Set browser components from GoLogin session
       (adapter as any).setBrowserComponents(
         goLoginSession.browser,
-        goLoginSession.context,
         goLoginSession.page,
         goLoginSession.stop
       );
@@ -133,7 +132,7 @@ export class ScenarioExecutor {
       const { createActionLogContext } = await import('../utils/actionLogger');
       const logContext = createActionLogContext(sessionId, undefined, socialAccountId);
 
-      await loggedGoto(goLoginSession.page, homeUrl, { waitUntil: 'networkidle' }, logContext);
+      await loggedGoto(goLoginSession.page, homeUrl, { waitUntil: 'networkidle0' }, logContext);
 
       if (!(await adapter.isLoggedIn())) {
         const credentials = await sessionService.getDecryptedCredentials(socialAccountId);
@@ -168,11 +167,10 @@ export class ScenarioExecutor {
         );
         const profileId = profileResult.rows.length > 0 ? profileResult.rows[0].id : undefined;
 
-        if (adapter && (adapter as any).context && (adapter as any).page) {
+        if (adapter && (adapter as any).page) {
           await snapshotService.captureSnapshot(
             sessionId,
             profileId,
-            (adapter as any).context,
             (adapter as any).page
           );
         }

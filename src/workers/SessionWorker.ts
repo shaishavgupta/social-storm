@@ -83,14 +83,13 @@ export class SessionWorker {
       // Set browser components from SessionRunner
       (adapter as any).setBrowserComponents(
         sessionContext.browser,
-        sessionContext.context,
         sessionContext.page,
         sessionContext.stop
       );
 
       // Check if logged in (GoLogin profile may already have session)
       const homeUrl = adapter.getHomeUrl();
-      await loggedGoto(sessionContext.page, homeUrl, { waitUntil: 'networkidle' }, sessionContext.logContext);
+      await loggedGoto(sessionContext.page, homeUrl, { waitUntil: 'networkidle0' }, sessionContext.logContext);
       let loggedIn = await adapter.isLoggedIn();
 
       if (loggedIn) {

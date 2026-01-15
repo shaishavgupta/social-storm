@@ -1,9 +1,9 @@
-import { Browser, BrowserContext, Page } from 'playwright';
+import { Browser, Page } from 'puppeteer-core';
 import { IPlatformAdapter } from '../interfaces/IPlatformAdapter';
 import { SocialAccountCredentials } from '../../models/SocialAccount';
 import { logger } from '../../utils/logger';
 import { humanDelay, randomDelay } from '../../utils/delay';
-import { openGoLoginSession, GoLoginSession } from '../../browser/gologinPlaywright';
+import { openGoLoginSession, GoLoginSession } from '../../browser/gologinPuppeteer';
 
 export interface GoLoginBrowserOptions {
   gologinToken: string;
@@ -12,7 +12,6 @@ export interface GoLoginBrowserOptions {
 
 export abstract class BaseAdapter implements IPlatformAdapter {
   protected browser: Browser | null = null;
-  protected context: BrowserContext | null = null;
   protected page: Page | null = null;
   protected isAuthenticated: boolean = false;
   protected stopGoLoginSession: (() => Promise<void>) | null = null;
@@ -39,7 +38,6 @@ export abstract class BaseAdapter implements IPlatformAdapter {
     });
 
     this.browser = goLoginSession.browser;
-    this.context = goLoginSession.context;
     this.page = goLoginSession.page;
     this.stopGoLoginSession = goLoginSession.stop;
 
@@ -52,12 +50,10 @@ export abstract class BaseAdapter implements IPlatformAdapter {
    */
   protected setBrowserComponents(
     browser: Browser,
-    context: BrowserContext,
     page: Page,
     stop?: () => Promise<void>
   ): void {
     this.browser = browser;
-    this.context = context;
     this.page = page;
     if (stop) {
       this.stopGoLoginSession = stop;
@@ -68,17 +64,19 @@ export abstract class BaseAdapter implements IPlatformAdapter {
    * Human-like mouse movement
    */
   protected async humanMouseMove(page: Page, selector: string): Promise<void> {
-    const element = await page.locator(selector).first();
-    const box = await element.boundingBox();
-    if (box) {
-      // Move mouse in a curved path
-      const steps = 5;
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const x = box.x + box.width / 2 + Math.sin(t * Math.PI) * 10;
-        const y = box.y + box.height / 2 + Math.cos(t * Math.PI) * 10;
-        await page.mouse.move(x, y, { steps: 1 });
-        await randomDelay(10, 30);
+    const element = await page.$(selector);
+    if (element) {
+      const box = await element.boundingBox();
+      if (box) {
+        // Move mouse in a curved path
+        const steps = 5;
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const x = box.x + box.width / 2 + Math.sin(t * Math.PI) * 10;
+          const y = box.y + box.height / 2 + Math.cos(t * Math.PI) * 10;
+          await page.mouse.move(x, y);
+          await randomDelay(10, 30);
+        }
       }
     }
   }
@@ -87,8 +85,19 @@ export abstract class BaseAdapter implements IPlatformAdapter {
    * Human-like typing with delays
    */
   protected async humanType(page: Page, selector: string, text: string): Promise<void> {
-    await page.locator(selector).click();
+    await page.click(selector);
     await humanDelay(200);
+
+    // Clear existing text first
+    // Code inside evaluate() runs in browser context where document and DOM types exist
+    await page.evaluate((sel) => {
+      // @ts-expect-error - This code runs in browser context where document and DOM types exist
+      const element = document.querySelector(sel);
+      // @ts-expect-error - HTMLInputElement and HTMLTextAreaElement exist in browser context
+      if (element && (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
+        element.value = '';
+      }
+    }, selector);
 
     for (const char of text) {
       const delay = Math.floor(Math.random() * (150 - 50 + 1)) + 50;
@@ -136,12 +145,40 @@ export abstract class BaseAdapter implements IPlatformAdapter {
    * @returns JSON string representation of the browser state
    */
   async saveBrowserState(): Promise<string> {
-    if (!this.context) {
-      throw new Error('Browser context not initialized');
+    if (!this.page) {
+      throw new Error('Browser page not initialized');
     }
 
     try {
-      const state = await this.context.storageState();
+      const cookies = await this.page.cookies();
+      const localStorage = await this.page.evaluate(() => {
+        const storage: Record<string, string> = {};
+        try {
+          // @ts-expect-error - This code runs in browser context where localStorage exists
+          for (let i = 0; i < localStorage.length; i++) {
+            // @ts-expect-error - This code runs in browser context where localStorage exists
+            const key = localStorage.key(i);
+            if (key) {
+              // @ts-expect-error - This code runs in browser context where localStorage exists
+              storage[key] = localStorage.getItem(key) || '';
+            }
+          }
+        } catch (e) {
+          // Ignore errors
+        }
+        return storage;
+      });
+
+      const state = {
+        cookies,
+        origins: [
+          {
+            origin: this.page.url(),
+            localStorage,
+          },
+        ],
+      };
+
       return JSON.stringify(state);
     } catch (error) {
       logger.error('Failed to save browser state:', error);
@@ -185,10 +222,6 @@ export abstract class BaseAdapter implements IPlatformAdapter {
         if (this.page) {
           await this.page.close();
           this.page = null;
-        }
-        if (this.context) {
-          await this.context.close();
-          this.context = null;
         }
         if (this.browser) {
           await this.browser.close();

@@ -1,4 +1,4 @@
-import { BrowserContext, Page } from 'playwright';
+import { Page } from 'puppeteer-core';
 import { getDbConnection } from '../database/connection';
 import { logger } from '../utils/logger';
 import { BrowserStateSnapshot, CreateBrowserStateSnapshotParams } from '../models/BrowserStateSnapshot';
@@ -13,12 +13,11 @@ export class BrowserStateSnapshotService {
   async captureSnapshot(
     sessionId: number,
     profileId: number | undefined,
-    context: BrowserContext,
     page: Page
   ): Promise<BrowserStateSnapshot> {
     try {
       // Get cookies
-      const cookies = await context.cookies();
+      const cookies = await page.cookies();
 
       // Get localStorage for all origins
       const localStorage: Record<string, Record<string, string>> = {};

@@ -16,7 +16,7 @@
   "keywords": [
     "social-media",
     "automation",
-    "playwright",
+    "puppeteer",
     "engagement"
   ],
   "author": "",
@@ -32,10 +32,10 @@
     "bullmq": "^5.4.0",
     "dotenv": "^16.6.1",
     "fastify": "^4.26.0",
-    "gologin": "^1.0.58",
+    "gologin": "^2.1.33",
     "ioredis": "^5.3.2",
     "pg": "^8.11.3",
-    "playwright": "^1.41.2",
+    "puppeteer-core": "^23.7.0",
     "winston": "^3.11.0",
     "zod": "^3.22.4"
   },

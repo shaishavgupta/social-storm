@@ -1,5 +1,5 @@
-import { BrowserContext, Page } from 'playwright';
-import { openGoLoginSession, GoLoginSession } from '../browser/gologinPlaywright';
+import { Browser, Page } from 'puppeteer-core';
+import { openGoLoginSession, GoLoginSession } from '../browser/gologinPuppeteer';
 import { ProfileManager } from '../gologin/profileManager';
 import { getActionLogService } from '../services/ActionLogService';
 import { getBrowserStateSnapshotService } from '../services/BrowserStateSnapshotService';
@@ -18,8 +18,7 @@ export interface SessionRunnerContext {
   sessionId: number;
   profileId: number;
   socialAccountId: number;
-  browser: import('playwright').Browser;
-  context: BrowserContext;
+  browser: Browser;
   page: Page;
   logContext: ActionLogContext;
   stop: () => Promise<void>;
@@ -113,7 +112,6 @@ export class SessionRunner {
       profileId: profile.id,
       socialAccountId,
       browser: goLoginSession.browser,
-      context: goLoginSession.context,
       page: goLoginSession.page,
       logContext,
       stop: goLoginSession.stop,
@@ -127,7 +125,7 @@ export class SessionRunner {
     sessionContext: SessionRunnerContext,
     error?: Error
   ): Promise<void> {
-    const { sessionId, profileId, socialAccountId, context: browserContext, page, stop, logContext } = sessionContext;
+    const { sessionId, profileId, socialAccountId, page, stop, logContext } = sessionContext;
 
     try {
       // Log session error if present
@@ -139,7 +137,7 @@ export class SessionRunner {
       // Create browser state snapshot
       try {
         const snapshotService = getBrowserStateSnapshotService();
-        await snapshotService.captureSnapshot(sessionId, profileId, browserContext, page);
+        await snapshotService.captureSnapshot(sessionId, profileId, page);
         logger.info(`Created browser state snapshot for session ${sessionId}`);
       } catch (snapshotError) {
         logger.warn(`Failed to create browser state snapshot for session ${sessionId}:`, snapshotError);
